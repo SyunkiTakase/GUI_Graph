@@ -1,12 +1,13 @@
 import sys
 import os
+import numpy as np
 import pandas as pd
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QListWidget, QListWidgetItem, QFileDialog,
     QLabel, QLineEdit, QMessageBox, QCheckBox, QTabWidget
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QFileSystemWatcher
 from matplotlib.backends.backend_qt5agg import (
     FigureCanvasQTAgg as FigureCanvas,
     NavigationToolbar2QT as NavigationToolbar
@@ -19,57 +20,51 @@ class LearningCurvePlotter(QMainWindow):
         super().__init__()
         self.setWindowTitle("Learning Curve Plotter")
         self.resize(1200, 700)
-        self.data = None
+        self.logs = []
         self.metrics = []
         self.color_map = {}
-        # Uniform figure size for display and save
-        self.fig_size = (8, 6)  # inches
+        self.line_styles = ['-', '--', ':', '-.']
+        self.fig_size = (8, 6)
 
-        # Central widget and layouts
+        self.watcher = QFileSystemWatcher()
+        self.watcher.fileChanged.connect(self.on_file_changed)
+
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
 
-        # Left side: toolbar + tabs
         left_widget = QWidget()
         self.left_layout = QVBoxLayout(left_widget)
         main_layout.addWidget(left_widget, stretch=3)
-
-        # Tab widget for plots
         self.tabs = QTabWidget()
         self.left_layout.addWidget(self.tabs)
-        self.toolbar = None  # will attach after plotting
+        self.toolbar = None
 
-        # Control panel
         ctrl = QWidget()
         ctrl_layout = QVBoxLayout(ctrl)
         main_layout.addWidget(ctrl, stretch=1)
 
-        # Load CSV
-        btn_load = QPushButton("Load log.csv")
-        btn_load.clicked.connect(self.load_csv)
+        btn_load = QPushButton("Load Logs")
+        btn_load.clicked.connect(self.load_logs)
         ctrl_layout.addWidget(btn_load)
 
-        # Separate tabs option
-        self.cb_sep_tabs = QCheckBox("Use Separate Tabs for Each Metric")
-        ctrl_layout.addWidget(self.cb_sep_tabs)
-
-        # Grid ON option
+        self.cb_sep = QCheckBox("Separate Tabs for Each Metric")
+        ctrl_layout.addWidget(self.cb_sep)
         self.cb_grid = QCheckBox("Grid ON")
         ctrl_layout.addWidget(self.cb_grid)
+        self.cb_side = QCheckBox("Side by Side Layout")
+        ctrl_layout.addWidget(self.cb_side)
+        self.cb_connect = QCheckBox("Connect Logs (>=2 logs)")
+        ctrl_layout.addWidget(self.cb_connect)
 
-        # Metrics list label and select-all
         ctrl_layout.addWidget(QLabel("Select Metrics to Plot:"))
-        btn_select_all = QPushButton("Plot All")
-        btn_select_all.clicked.connect(self.select_all_metrics)
-        ctrl_layout.addWidget(btn_select_all)
-
-        # Metrics list widget
+        btn_all = QPushButton("Plot All")
+        btn_all.clicked.connect(self.select_all_metrics)
+        ctrl_layout.addWidget(btn_all)
         self.list_widget = QListWidget()
         self.list_widget.setSelectionMode(QListWidget.NoSelection)
         ctrl_layout.addWidget(self.list_widget)
 
-        # Plot & Save buttons
         btn_plot = QPushButton("Plot Selected")
         btn_plot.clicked.connect(self.plot_selected)
         ctrl_layout.addWidget(btn_plot)
@@ -80,132 +75,237 @@ class LearningCurvePlotter(QMainWindow):
         btn_save = QPushButton("Save Plots")
         btn_save.clicked.connect(self.save_plot)
         ctrl_layout.addWidget(btn_save)
-
         ctrl_layout.addStretch()
 
-    def load_csv(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open CSV log file", "", "CSV files (*.csv)")
-        if not path:
+    def load_logs(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Open CSV log files", "", "CSV files (*.csv)"
+        )
+        if not paths:
             return
-        try:
-            self.data = pd.read_csv(path)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load CSV:\n{e}")
-            return
-
-        # Extract base metric names, filter out 'epoch'
+        self.logs.clear()
+        self.watcher.removePaths(self.watcher.files())
+        for p in paths:
+            try:
+                df = pd.read_csv(p)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to load {p}: {e}")
+                continue
+            name = os.path.splitext(os.path.basename(p))[0]
+            self.logs.append({'path': p, 'df': df, 'name': name})
+            self.watcher.addPath(p)
         bases = []
-        for col in self.data.columns:
-            col_lower = col.lower()
-            if col_lower.startswith("train_"):
-                base = col[6:]
-            elif col_lower.startswith("val_"):
-                base = col[4:]
-            else:
-                base = col
-            bases.append(base)
-        self.metrics = sorted({m for m in bases if m.lower() != "epoch"})
-
-        # Create consistent color map
-        default_colors = rcParams['axes.prop_cycle'].by_key()['color']
-        self.color_map = {m: default_colors[i % len(default_colors)] for i, m in enumerate(self.metrics)}
-
-        # Populate list widget
+        for log in self.logs:
+            for col in log['df'].columns:
+                cl = col.lower()
+                if cl.startswith('train_'):
+                    bases.append(col[6:])
+                elif cl.startswith('val_'):
+                    bases.append(col[4:])
+                elif col.lower() != 'epoch':
+                    bases.append(col)
+        self.metrics = sorted(set(bases))
+        colors = rcParams['axes.prop_cycle'].by_key()['color']
+        self.color_map = {m: colors[i % len(colors)] for i, m in enumerate(self.metrics)}
         self.list_widget.clear()
         for m in self.metrics:
             item = QListWidgetItem(m)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Unchecked)
             self.list_widget.addItem(item)
+        QMessageBox.information(
+            self, "Loaded",
+            f"Loaded {len(self.logs)} logs. Metrics: {', '.join(self.metrics)}"
+        )
 
-        QMessageBox.information(self, "Loaded", f"Loaded {path}\nDetected metrics: {', '.join(self.metrics)}")
+    def on_file_changed(self, path):
+        for log in self.logs:
+            if log['path'] == path:
+                try:
+                    log['df'] = pd.read_csv(path)
+                except:
+                    pass
+        self.plot_selected()
 
     def select_all_metrics(self):
         for i in range(self.list_widget.count()):
             self.list_widget.item(i).setCheckState(Qt.Checked)
 
     def plot_selected(self):
-        if self.data is None:
-            QMessageBox.warning(self, "Warning", "Please load a CSV file first.")
+        if not self.logs:
+            QMessageBox.warning(self, "Warning", "Load logs first.")
             return
-        selected = [self.list_widget.item(i).text() for i in range(self.list_widget.count()) if self.list_widget.item(i).checkState() == Qt.Checked]
+        selected = [
+            self.list_widget.item(i).text()
+            for i in range(self.list_widget.count())
+            if self.list_widget.item(i).checkState() == Qt.Checked
+        ]
         if not selected:
-            QMessageBox.warning(self, "Warning", "Select at least one metric to plot.")
+            QMessageBox.warning(self, "Warning", "Select metrics.")
             return
+        grid = self.cb_grid.isChecked()
+        side = self.cb_side.isChecked()
+        sep = self.cb_sep.isChecked()
+        conn = self.cb_connect.isChecked() and len(self.logs) >= 2
 
-        use_sep = self.cb_sep_tabs.isChecked()
-        grid_on = self.cb_grid.isChecked()
-        loss_metrics = [m for m in selected if 'acc' not in m.lower()]
-        acc_metrics = [m for m in selected if 'acc' in m.lower()]
-
-        # Clear existing tabs and toolbar
         self.tabs.clear()
         if self.toolbar:
             self.toolbar.setParent(None)
 
-        # Plotting: use uniform figsize
-        def new_fig(): return Figure(figsize=self.fig_size)
+        def new_fig():
+            return Figure(figsize=self.fig_size)
 
-        if use_sep:
-            for base in selected:
-                fig = new_fig(); ax = fig.add_subplot(111)
-                self._plot_metric(ax, base); ax.set_title(base); ax.grid(grid_on); ax.legend(); fig.tight_layout()
-                canvas=FigureCanvas(fig); tab=QWidget(); layout=QVBoxLayout(tab); layout.addWidget(canvas); self.tabs.addTab(tab, base)
-            if loss_metrics:
-                fig = new_fig(); ax = fig.add_subplot(111)
-                for m in loss_metrics: self._plot_metric(ax, m)
-                ax.set_title('All Loss'); ax.grid(grid_on); ax.legend(); fig.tight_layout()
-                canvas=FigureCanvas(fig); tab=QWidget(); layout=QVBoxLayout(tab); layout.addWidget(canvas); self.tabs.addTab(tab, 'All Loss')
-            if acc_metrics:
-                fig = new_fig(); ax = fig.add_subplot(111)
-                for m in acc_metrics: self._plot_metric(ax, m)
-                ax.set_title('All Accuracy'); ax.grid(grid_on); ax.legend(); fig.tight_layout()
-                canvas=FigureCanvas(fig); tab=QWidget(); layout=QVBoxLayout(tab); layout.addWidget(canvas); self.tabs.addTab(tab, 'All Accuracy')
+        # Side by Side Layout
+        if side:
+            fig = new_fig()
+            axes = fig.subplots(1, len(selected), squeeze=False)[0]
+            for ax, m in zip(axes, selected):
+                if conn and not sep:
+                    self.plot_combined(ax, m)
+                else:
+                    if conn and sep:
+                        self.plot_combined(ax, m)
+                    else:
+                        self.draw_metric(ax, m, conn)
+                ax.set_title(m)
+                ax.grid(grid)
+                handles, labels = ax.get_legend_handles_labels()
+                if handles:
+                    ax.legend(handles, labels)
+            fig.tight_layout()
+            canvas = FigureCanvas(fig)
+            tab = QWidget()
+            layout = QVBoxLayout(tab)
+            layout.addWidget(canvas)
+            self.tabs.addTab(tab, 'Side by Side')
+
+        # Separate Tabs for Each Metric
+        elif sep:
+            for m in selected:
+                fig = new_fig()
+                ax = fig.add_subplot(111)
+                if conn:
+                    self.plot_combined(ax, m)
+                else:
+                    self.draw_metric(ax, m, conn)
+                ax.set_title(m)
+                ax.grid(grid)
+                handles, labels = ax.get_legend_handles_labels()
+                if handles:
+                    ax.legend(handles, labels)
+                fig.tight_layout()
+                canvas = FigureCanvas(fig)
+                tab = QWidget()
+                layout = QVBoxLayout(tab)
+                layout.addWidget(canvas)
+                self.tabs.addTab(tab, m)
+
+        # Aggregated Loss & Accuracy
         else:
-            if loss_metrics:
-                fig = new_fig(); ax = fig.add_subplot(111)
-                for m in loss_metrics: self._plot_metric(ax, m)
-                ax.set_title('Loss'); ax.grid(grid_on); ax.legend(); fig.tight_layout()
-                canvas=FigureCanvas(fig); tab=QWidget(); layout=QVBoxLayout(tab); layout.addWidget(canvas); self.tabs.addTab(tab, 'Loss')
-            if acc_metrics:
-                fig = new_fig(); ax = fig.add_subplot(111)
-                for m in acc_metrics: self._plot_metric(ax, m)
-                ax.set_title('Accuracy'); ax.grid(grid_on); ax.legend(); fig.tight_layout()
-                canvas=FigureCanvas(fig); tab=QWidget(); layout=QVBoxLayout(tab); layout.addWidget(canvas); self.tabs.addTab(tab, 'Accuracy')
+            loss = [m for m in selected if 'acc' not in m.lower()]
+            acc = [m for m in selected if 'acc' in m.lower()]
+            if loss:
+                fig = new_fig()
+                ax = fig.add_subplot(111)
+                for m in loss:
+                    if conn:
+                        self.plot_combined(ax, m)
+                    else:
+                        self.draw_metric(ax, m, conn)
+                ax.set_title('Loss')
+                ax.grid(grid)
+                handles, labels = ax.get_legend_handles_labels()
+                if handles:
+                    ax.legend(handles, labels)
+                fig.tight_layout()
+                canvas = FigureCanvas(fig)
+                tab = QWidget()
+                layout = QVBoxLayout(tab)
+                layout.addWidget(canvas)
+                self.tabs.addTab(tab, 'Loss')
+            if acc:
+                fig = new_fig()
+                ax = fig.add_subplot(111)
+                for m in acc:
+                    if conn:
+                        self.plot_combined(ax, m)
+                    else:
+                        self.draw_metric(ax, m, conn)
+                ax.set_title('Accuracy')
+                ax.grid(grid)
+                handles, labels = ax.get_legend_handles_labels()
+                if handles:
+                    ax.legend(handles, labels)
+                fig.tight_layout()
+                canvas = FigureCanvas(fig)
+                tab = QWidget()
+                layout = QVBoxLayout(tab)
+                layout.addWidget(canvas)
+                self.tabs.addTab(tab, 'Accuracy')
 
-        # Add navigation toolbar
         first_canvas = self.tabs.widget(0).findChild(FigureCanvas)
         self.toolbar = NavigationToolbar(first_canvas, self)
         self.left_layout.insertWidget(0, self.toolbar)
 
-    def _plot_metric(self, ax, base):
-        color = self.color_map.get(base)
-        train_col, val_col = f"train_{base}", f"val_{base}"
-        if train_col in self.data.columns:
-            ax.plot(self.data[train_col], label=train_col, color=color, linestyle='-')
-        if val_col in self.data.columns:
-            ax.plot(self.data[val_col], label=val_col, color=color, linestyle='--')
-        if base in self.data.columns and train_col not in self.data.columns and val_col not in self.data.columns:
-            ax.plot(self.data[base], label=base, color=color, linestyle='-')
-        ax.set_xlabel('')
+    def draw_metric(self, ax, metric, conn):
+        color = self.color_map.get(metric)
+        for idx, log in enumerate(self.logs):
+            df = log['df']
+            style = self.line_styles[idx % len(self.line_styles)]
+            tcol = f"train_{metric}"
+            vcol = f"val_{metric}"
+            if tcol in df.columns:
+                ax.plot(df[tcol].values, label=f"{log['name']}:{tcol}", color=color, linestyle=style)
+            if vcol in df.columns:
+                ax.plot(df[vcol].values, label=f"{log['name']}:{vcol}", color=color, linestyle='--')
+            if metric in df.columns and tcol not in df.columns and vcol not in df.columns:
+                ax.plot(df[metric].values, label=f"{log['name']}:{metric}", color=color, linestyle='-')
+        ax.set_xlabel('Iterations')
+
+    def plot_combined(self, ax, metric):
+        color = self.color_map.get(metric)
+        train_series = []
+        val_series = []
+        base_series = []
+        for log in self.logs:
+            df = log['df']
+            tcol = f"train_{metric}"
+            vcol = f"val_{metric}"
+            if tcol in df.columns:
+                train_series.append(df[tcol].values)
+            if vcol in df.columns:
+                val_series.append(df[vcol].values)
+            if metric in df.columns and tcol not in df.columns and vcol not in df.columns:
+                base_series.append(df[metric].values)
+        if train_series:
+            y_train = np.concatenate(train_series)
+            x_train = np.arange(len(y_train))
+            ax.plot(x_train, y_train, label=f"train_{metric}", color=color, linestyle='-')
+        if val_series:
+            y_val = np.concatenate(val_series)
+            x_val = np.arange(len(y_val))
+            ax.plot(x_val, y_val, label=f"val_{metric}", color=color, linestyle='--')
+        if not train_series and not val_series and base_series:
+            y = np.concatenate(base_series)
+            x = np.arange(len(y))
+            ax.plot(x, y, label=metric, color=color, linestyle='-')
+        ax.set_xlabel('Iterations')
 
     def save_plot(self):
-        base_name = self.edit_filename.text().strip()
-        if not base_name:
-            QMessageBox.warning(self, "Warning", "Enter a base filename.")
+        name = self.edit_filename.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Warning", "Enter filename.")
             return
         directory = QFileDialog.getExistingDirectory(self, "Select Directory to Save Plots")
         if not directory:
             return
-        root, ext = os.path.splitext(base_name)
-        ext = ext if ext else '.png'
-        for idx in range(self.tabs.count()):
-            title = self.tabs.tabText(idx)
-            canvas = self.tabs.widget(idx).findChild(FigureCanvas)
-            # Ensure uniform size on save
+        base, ext = os.path.splitext(name)
+        ext = ext or '.png'
+        for i in range(self.tabs.count()):
+            title = self.tabs.tabText(i)
+            canvas = self.tabs.widget(i).findChild(FigureCanvas)
             canvas.figure.set_size_inches(self.fig_size)
-            save_path = os.path.join(directory, f"{title}_{root}{ext}")
-            canvas.figure.savefig(save_path)
+            canvas.figure.savefig(os.path.join(directory, f"{title}_{base}{ext}"))
         QMessageBox.information(self, "Saved", f"Plots saved to {directory}")
 
 if __name__ == '__main__':
