@@ -66,9 +66,4 @@ python plot_gui_graph.py
 ![RESULT-1](./fig/07.png)
 
 * 5-2，比較したい対象だけチェックボックスで選択して，`選択プロット`ボタンクリック，`メトリクスごとにタブ分割`のチェックボックスを選択することで，複数のグラフをタブごとに分割表示
-<p>
-![RESULT-2](./fig/08.png)
-![RESULT-2](./fig/09.png)
-![RESULT-2](./fig/10.png)
-![RESULT-2](./fig/11.png)
-</p>
+![RESULT-2](./fig/08.png)![RESULT-2](./fig/09.png)![RESULT-2](./fig/10.png)![RESULT-2](./fig/11.png)
