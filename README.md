@@ -40,9 +40,10 @@ $ python train.py --config_path ./Config/resnet_config.py
 ```
 
 ### 描画
+
 * 描画ツールの起動
 ```
 python plot_gui_graph.py
 ```
-![START](./fig/スクリーンショット (2).png)
+![START](./fig/02.png)
 
