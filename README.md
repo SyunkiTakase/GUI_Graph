@@ -1,5 +1,5 @@
 # GUI_Graph
-Metric Learningのサンプルコード
+学習曲線表示用のGUIツール
 
 ## ファイル＆フォルダ一覧
 
