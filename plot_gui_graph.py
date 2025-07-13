@@ -18,7 +18,7 @@ from matplotlib import rcParams
 class LearningCurvePlotter(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Learning Curve Plotter")
+        self.setWindowTitle("学習曲線プロットツール")
         self.resize(1200, 700)
         self.logs = []
         self.metrics = []
@@ -44,42 +44,46 @@ class LearningCurvePlotter(QMainWindow):
         ctrl_layout = QVBoxLayout(ctrl)
         main_layout.addWidget(ctrl, stretch=1)
 
-        btn_load = QPushButton("Load Logs")
+        # ログ読み込みボタン
+        btn_load = QPushButton("ログ読み込み")
         btn_load.clicked.connect(self.load_logs)
         ctrl_layout.addWidget(btn_load)
 
-        self.cb_sep = QCheckBox("Separate Tabs for Each Metric")
+        # 各種オプション
+        self.cb_sep = QCheckBox("メトリクスごとにタブ分割")
         ctrl_layout.addWidget(self.cb_sep)
-        self.cb_grid = QCheckBox("Grid ON")
+        self.cb_grid = QCheckBox("グリッド表示")
         ctrl_layout.addWidget(self.cb_grid)
-        self.cb_side = QCheckBox("Side by Side Layout")
+        self.cb_side = QCheckBox("横並びレイアウト")
         ctrl_layout.addWidget(self.cb_side)
-        self.cb_connect = QCheckBox("Connect Logs (>=2 logs)")
+        self.cb_connect = QCheckBox("ログ接続表示 (2つ以上)")
         ctrl_layout.addWidget(self.cb_connect)
 
-        ctrl_layout.addWidget(QLabel("Select Metrics to Plot:"))
-        btn_all = QPushButton("Plot All")
+        # メトリクス選択
+        ctrl_layout.addWidget(QLabel("プロットするメトリクスを選択："))
+        btn_all = QPushButton("全てプロット")
         btn_all.clicked.connect(self.select_all_metrics)
         ctrl_layout.addWidget(btn_all)
         self.list_widget = QListWidget()
         self.list_widget.setSelectionMode(QListWidget.NoSelection)
         ctrl_layout.addWidget(self.list_widget)
 
-        btn_plot = QPushButton("Plot Selected")
+        # プロット・保存
+        btn_plot = QPushButton("選択プロット")
         btn_plot.clicked.connect(self.plot_selected)
         ctrl_layout.addWidget(btn_plot)
 
-        ctrl_layout.addWidget(QLabel("Save As (base filename, e.g. plot.png):"))
+        ctrl_layout.addWidget(QLabel("保存ファイル名 (例: plot.png)："))
         self.edit_filename = QLineEdit("plot.png")
         ctrl_layout.addWidget(self.edit_filename)
-        btn_save = QPushButton("Save Plots")
+        btn_save = QPushButton("プロット保存")
         btn_save.clicked.connect(self.save_plot)
         ctrl_layout.addWidget(btn_save)
         ctrl_layout.addStretch()
 
     def load_logs(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Open CSV log files", "", "CSV files (*.csv)"
+            self, "CSVログファイルを開く", "", "CSV ファイル (*.csv)"
         )
         if not paths:
             return
@@ -89,11 +93,13 @@ class LearningCurvePlotter(QMainWindow):
             try:
                 df = pd.read_csv(p)
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to load {p}: {e}")
+                QMessageBox.critical(self, "エラー", f"{os.path.basename(p)} の読み込みに失敗しました：\n{e}")
                 continue
             name = os.path.splitext(os.path.basename(p))[0]
             self.logs.append({'path': p, 'df': df, 'name': name})
             self.watcher.addPath(p)
+
+        # メトリクス検出
         bases = []
         for log in self.logs:
             for col in log['df'].columns:
@@ -102,20 +108,25 @@ class LearningCurvePlotter(QMainWindow):
                     bases.append(col[6:])
                 elif cl.startswith('val_'):
                     bases.append(col[4:])
-                elif col.lower() != 'epoch':
+                elif cl != 'epoch':
                     bases.append(col)
         self.metrics = sorted(set(bases))
+
+        # カラーマップ設定
         colors = rcParams['axes.prop_cycle'].by_key()['color']
         self.color_map = {m: colors[i % len(colors)] for i, m in enumerate(self.metrics)}
+
+        # メトリクス一覧に反映
         self.list_widget.clear()
         for m in self.metrics:
             item = QListWidgetItem(m)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Unchecked)
             self.list_widget.addItem(item)
+
         QMessageBox.information(
-            self, "Loaded",
-            f"Loaded {len(self.logs)} logs. Metrics: {', '.join(self.metrics)}"
+            self, "読み込み完了",
+            f"{len(self.logs)} 件のログを読み込みました。\nメトリクス: {', '.join(self.metrics)}"
         )
 
     def on_file_changed(self, path):
@@ -133,7 +144,7 @@ class LearningCurvePlotter(QMainWindow):
 
     def plot_selected(self):
         if not self.logs:
-            QMessageBox.warning(self, "Warning", "Load logs first.")
+            QMessageBox.warning(self, "警告", "先にログを読み込んでください。")
             return
         selected = [
             self.list_widget.item(i).text()
@@ -141,8 +152,9 @@ class LearningCurvePlotter(QMainWindow):
             if self.list_widget.item(i).checkState() == Qt.Checked
         ]
         if not selected:
-            QMessageBox.warning(self, "Warning", "Select metrics.")
+            QMessageBox.warning(self, "警告", "メトリクスを選択してください。")
             return
+
         grid = self.cb_grid.isChecked()
         side = self.cb_side.isChecked()
         sep = self.cb_sep.isChecked()
@@ -155,7 +167,7 @@ class LearningCurvePlotter(QMainWindow):
         def new_fig():
             return Figure(figsize=self.fig_size)
 
-        # Side by Side Layout
+        # 横並びレイアウト
         if side:
             fig = new_fig()
             axes = fig.subplots(1, len(selected), squeeze=False)[0]
@@ -177,9 +189,9 @@ class LearningCurvePlotter(QMainWindow):
             tab = QWidget()
             layout = QVBoxLayout(tab)
             layout.addWidget(canvas)
-            self.tabs.addTab(tab, 'Side by Side')
+            self.tabs.addTab(tab, '横並び')
 
-        # Separate Tabs for Each Metric
+        # メトリクスごとタブ
         elif sep:
             for m in selected:
                 fig = new_fig()
@@ -200,7 +212,7 @@ class LearningCurvePlotter(QMainWindow):
                 layout.addWidget(canvas)
                 self.tabs.addTab(tab, m)
 
-        # Aggregated Loss & Accuracy
+        # Loss & Accuracy タブ
         else:
             loss = [m for m in selected if 'acc' not in m.lower()]
             acc = [m for m in selected if 'acc' in m.lower()]
@@ -243,6 +255,7 @@ class LearningCurvePlotter(QMainWindow):
                 layout.addWidget(canvas)
                 self.tabs.addTab(tab, 'Accuracy')
 
+        # ナビゲーションツールバー追加
         first_canvas = self.tabs.widget(0).findChild(FigureCanvas)
         self.toolbar = NavigationToolbar(first_canvas, self)
         self.left_layout.insertWidget(0, self.toolbar)
@@ -260,17 +273,14 @@ class LearningCurvePlotter(QMainWindow):
                 ax.plot(df[vcol].values, label=f"{log['name']}:{vcol}", color=color, linestyle='--')
             if metric in df.columns and tcol not in df.columns and vcol not in df.columns:
                 ax.plot(df[metric].values, label=f"{log['name']}:{metric}", color=color, linestyle='-')
-        ax.set_xlabel('Iterations')
+        ax.set_xlabel('Epoch')
 
     def plot_combined(self, ax, metric):
         color = self.color_map.get(metric)
-        train_series = []
-        val_series = []
-        base_series = []
+        train_series, val_series, base_series = [], [], []
         for log in self.logs:
             df = log['df']
-            tcol = f"train_{metric}"
-            vcol = f"val_{metric}"
+            tcol, vcol = f"train_{metric}", f"val_{metric}"
             if tcol in df.columns:
                 train_series.append(df[tcol].values)
             if vcol in df.columns:
@@ -278,25 +288,22 @@ class LearningCurvePlotter(QMainWindow):
             if metric in df.columns and tcol not in df.columns and vcol not in df.columns:
                 base_series.append(df[metric].values)
         if train_series:
-            y_train = np.concatenate(train_series)
-            x_train = np.arange(len(y_train))
-            ax.plot(x_train, y_train, label=f"train_{metric}", color=color, linestyle='-')
+            y = np.concatenate(train_series); x = np.arange(len(y))
+            ax.plot(x, y, label=f"train_{metric}", color=color, linestyle='-')
         if val_series:
-            y_val = np.concatenate(val_series)
-            x_val = np.arange(len(y_val))
-            ax.plot(x_val, y_val, label=f"val_{metric}", color=color, linestyle='--')
+            y = np.concatenate(val_series); x = np.arange(len(y))
+            ax.plot(x, y, label=f"val_{metric}", color=color, linestyle='--')
         if not train_series and not val_series and base_series:
-            y = np.concatenate(base_series)
-            x = np.arange(len(y))
+            y = np.concatenate(base_series); x = np.arange(len(y))
             ax.plot(x, y, label=metric, color=color, linestyle='-')
         ax.set_xlabel('Iterations')
 
     def save_plot(self):
         name = self.edit_filename.text().strip()
         if not name:
-            QMessageBox.warning(self, "Warning", "Enter filename.")
+            QMessageBox.warning(self, "警告", "ファイル名を入力してください。")
             return
-        directory = QFileDialog.getExistingDirectory(self, "Select Directory to Save Plots")
+        directory = QFileDialog.getExistingDirectory(self, "プロット保存先を選択")
         if not directory:
             return
         base, ext = os.path.splitext(name)
@@ -306,7 +313,7 @@ class LearningCurvePlotter(QMainWindow):
             canvas = self.tabs.widget(i).findChild(FigureCanvas)
             canvas.figure.set_size_inches(self.fig_size)
             canvas.figure.savefig(os.path.join(directory, f"{title}_{base}{ext}"))
-        QMessageBox.information(self, "Saved", f"Plots saved to {directory}")
+        QMessageBox.information(self, "保存完了", f"プロットを保存しました：\n{directory}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
